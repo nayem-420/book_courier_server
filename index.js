@@ -31,6 +31,20 @@ async function run() {
       await client.connect();
       
 
+      const db = client.db('book-courier-db');
+      const booksCollection = db.collection('books');
+
+
+      //   books related API's
+      app.get('/books', async(req, res) = {
+          
+      })
+      app.post('/books', async (req, res) => {
+          const books = req.body;
+          const result = await booksCollection.insertOne(books);
+          res.send(result);
+      })
+
 
 
     // Send a ping to confirm a successful connection
