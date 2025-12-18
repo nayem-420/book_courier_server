@@ -3,6 +3,8 @@ const cors = require("cors");
 const app = express();
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
+
 
 const port = process.env.PORT || 3000;
 
@@ -53,6 +55,23 @@ async function run() {
       const result = await booksCollection.insertOne(books);
       res.send(result);
     });
+
+
+      //   payment related API's
+      app.post("/create-checkout-session", async (req, res) => {
+          const paymentInfo = req.body;
+          const session = await stripe.checkout.sessions.create({
+            line_items: [
+              {
+                // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+                price: "{{PRICE_ID}}",
+                quantity: 1,
+              },
+            ],
+            mode: "payment",
+            success_url: `${YOUR_DOMAIN}?success=true`,
+          });
+      });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
