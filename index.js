@@ -5,12 +5,17 @@ require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET);
 
-
 const port = process.env.PORT || 3000;
 
 // middleware
 app.use(express.json());
-app.use(cors());
+app.use(
+  cors({
+    origin: [process.env.CLIENT_DOMAIN],
+    credentials: true,
+    optionSuccessStatus: 200,
+  })
+);
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.xhgpsyg.mongodb.net/?appName=Cluster0`;
 
@@ -29,7 +34,8 @@ async function run() {
     // await client.connect();
 
     const db = client.db("book-courier-db");
-    const booksCollection = db.collection("books");
+      const booksCollection = db.collection("books");
+      const ordersCollection = db.collection("orders");
 
     //   books related API's
     app.get("/books", async (req, res) => {
@@ -56,21 +62,65 @@ async function run() {
       res.send(result);
     });
 
-
-      //   payment related API's
-      app.post("/create-checkout-session", async (req, res) => {
-          const paymentInfo = req.body;
-          const session = await stripe.checkout.sessions.create({
-            line_items: [
-              {
-                // Provide the exact Price ID (for example, price_1234) of the product you want to sell
-                price: "{{PRICE_ID}}",
-                quantity: 1,
+    //   payment related API's
+    app.post("/create-checkout-session", async (req, res) => {
+      const paymentInfo = req.body;
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+            price_data: {
+              currency: "USD",
+              product_data: {
+                name: paymentInfo?.title,
+                description: paymentInfo?.description,
+                images: [paymentInfo?.image],
               },
-            ],
-            mode: "payment",
-            success_url: `${YOUR_DOMAIN}?success=true`,
-          });
+              unit_amount: paymentInfo?.price * 100,
+            },
+            quantity: paymentInfo?.quantity,
+          },
+        ],
+        customer_email: paymentInfo?.customer?.email,
+        mode: "payment",
+        metadata: {
+          bookId: paymentInfo?.bookId,
+          customer: paymentInfo?.customer.email,
+        },
+        success_url: `${process.env.CLIENT_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.CLIENT_DOMAIN}/book/${paymentInfo?.bookId}`,
+      });
+      res.send({ url: session.url });
+    });
+
+    app.post("/payment-success", async (req, res) => {
+      const { sessionId } = req.body;
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const book = await booksCollection.findOne({
+        _id: new ObjectId(session.metadata.bookId),
+      });
+      if (session.status === "complete") {
+        const orderInfo = {
+          bookId: session.metadata.bookId,
+          transactionId: session.payment_intent,
+          customer: paymentInfo.metadata.customer,
+          status: "pending",
+          seller: book.seller,
+          name: book.name,
+          category: book.category,
+          quantity: 1,
+          price: session.amount_total / 100,
+        };
+      }
+    });
+      
+      app.get("/my-orders/:email", async (req, res) => {
+        const email = req.params.email;
+
+        const result = await ordersCollection
+          .find({ customer: email })
+          .toArray();
+        res.send(result);
       });
 
     // Send a ping to confirm a successful connection
