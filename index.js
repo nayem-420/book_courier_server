@@ -34,8 +34,8 @@ async function run() {
     // await client.connect();
 
     const db = client.db("book-courier-db");
-      const booksCollection = db.collection("books");
-      const ordersCollection = db.collection("orders");
+    const booksCollection = db.collection("books");
+    const ordersCollection = db.collection("orders");
 
     //   books related API's
     app.get("/books", async (req, res) => {
@@ -113,15 +113,28 @@ async function run() {
         };
       }
     });
-      
-      app.get("/my-orders/:email", async (req, res) => {
-        const email = req.params.email;
 
-        const result = await ordersCollection
-          .find({ customer: email })
-          .toArray();
-        res.send(result);
-      });
+    app.get("/my-orders/:email", async (req, res) => {
+      const email = req.params.email;
+
+      const result = await ordersCollection.find({ customer: email }).toArray();
+      res.send(result);
+    });
+      
+    //   seller orders
+    app.get("/manage-orders/:email", async (req, res) => {
+      const email = req.params.email;
+
+      const result = await ordersCollection.find({ 'seller.email': email }).toArray();
+      res.send(result);
+    });
+      
+    app.get("/my-inventory/:email", async (req, res) => {
+      const email = req.params.email;
+
+      const result = await booksCollection.find({ 'seller.email': email }).toArray();
+      res.send(result);
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
