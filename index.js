@@ -175,16 +175,15 @@ async function run() {
     });
 
     //   seller orders
-    app.get("/manage-orders/:email", async (req, res) => {
+    app.get("/dashboard/manage-orders/:email", async (req, res) => {
       const email = req.params.email;
-
       const result = await ordersCollection
         .find({ "seller.email": email })
         .toArray();
       res.send(result);
     });
 
-    app.get("/my-inventory/:email", async (req, res) => {
+    app.get("/dashboard/my-inventory/:email", async (req, res) => {
       const email = req.params.email;
 
       const result = await booksCollection
