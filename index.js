@@ -93,46 +93,103 @@ async function run() {
       res.send({ url: session.url });
     });
 
-    app.post("/payment-success", async (req, res) => {
-      const { sessionId } = req.body;
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
-      const book = await booksCollection.findOne({
-        _id: new ObjectId(session.metadata.bookId),
-      });
-      if (session.status === "complete") {
+    app.post("/dashboard/payment-success", async (req, res) => {
+      try {
+        const { sessionId } = req.body;
+
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+        if (session.payment_status !== "paid") {
+          return res.status(400).send({
+            success: false,
+            message: "Payment not completed",
+          });
+        }
+
+        const existingOrder = await ordersCollection.findOne({
+          transactionId: session.payment_intent,
+        });
+
+        if (existingOrder) {
+          return res.send({
+            success: true,
+            message: "Order already exists",
+            transactionId: session.payment_intent,
+            orderId: existingOrder._id,
+          });
+        }
+
+        const book = await booksCollection.findOne({
+          _id: new ObjectId(session.metadata.bookId),
+        });
+
+        if (!book) {
+          return res.status(404).send({
+            success: false,
+            message: "Book not found",
+          });
+        }
+
         const orderInfo = {
           bookId: session.metadata.bookId,
+          image: book.image || "",
+          title: book.title || "Unknown Book",
           transactionId: session.payment_intent,
-          customer: paymentInfo.metadata.customer,
+          customer: session.metadata.customer,
           status: "pending",
           seller: book.seller,
-          name: book.name,
-          category: book.category,
+          category: book.status || "N/A",
           quantity: 1,
           price: session.amount_total / 100,
+          createdAt: new Date(),
         };
+
+        const result = await ordersCollection.insertOne(orderInfo);
+
+        await booksCollection.updateOne(
+          { _id: new ObjectId(session.metadata.bookId) },
+          { $inc: { quantity: -1 } }
+        );
+
+        return res.send({
+          success: true,
+          message: "Order created successfully",
+          transactionId: session.payment_intent,
+          orderId: result.insertedId,
+        });
+      } catch (error) {
+
+        return res.status(500).send({
+          success: false,
+          message: "Error processing order",
+          error: error.message,
+        });
       }
     });
 
-    app.get("/my-orders/:email", async (req, res) => {
+    app.get("/dashboard/my-orders/:email", async (req, res) => {
       const email = req.params.email;
 
       const result = await ordersCollection.find({ customer: email }).toArray();
       res.send(result);
     });
-      
+
     //   seller orders
     app.get("/manage-orders/:email", async (req, res) => {
       const email = req.params.email;
 
-      const result = await ordersCollection.find({ 'seller.email': email }).toArray();
+      const result = await ordersCollection
+        .find({ "seller.email": email })
+        .toArray();
       res.send(result);
     });
-      
+
     app.get("/my-inventory/:email", async (req, res) => {
       const email = req.params.email;
 
-      const result = await booksCollection.find({ 'seller.email': email }).toArray();
+      const result = await booksCollection
+        .find({ "seller.email": email })
+        .toArray();
       res.send(result);
     });
 
