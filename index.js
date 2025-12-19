@@ -36,6 +36,71 @@ async function run() {
     const db = client.db("book-courier-db");
     const booksCollection = db.collection("books");
     const ordersCollection = db.collection("orders");
+    const usersCollection = db.collection("users");
+
+    //   user related API's
+    app.post("/users", async (req, res) => {
+      try {
+        const user = req.body;
+
+        // Check if user already exists
+        const existingUser = await usersCollection.findOne({
+          email: user.email,
+        });
+
+        if (existingUser) {
+          return res.send({
+            success: true,
+            message: "User already exists",
+            insertedId: existingUser._id,
+          });
+        }
+
+        // Create new user
+        const newUser = {
+          ...user,
+          role: "buyer",
+          createdAt: new Date(),
+        };
+
+        const result = await usersCollection.insertOne(newUser);
+
+        res.send({
+          success: true,
+          message: "User created successfully",
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Error creating user",
+          error: error.message,
+        });
+      }
+    });
+
+    // Get user by email
+    app.get("/users/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const user = await usersCollection.findOne({ email: email });
+
+        if (!user) {
+          return res.status(404).send({
+            success: false,
+            message: "User not found",
+          });
+        }
+
+        res.send(user);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: "Error fetching user",
+          error: error.message,
+        });
+      }
+    });
 
     //   books related API's
     app.get("/books", async (req, res) => {
@@ -47,6 +112,15 @@ async function run() {
       }
       const cursor = booksCollection.find(query);
       const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    app.get("/home-books", async (req, res) => {
+      const result = await booksCollection
+        .find({ status: "published" })
+        .limit(6)
+        .toArray();
+
       res.send(result);
     });
 
@@ -88,7 +162,7 @@ async function run() {
           customer: paymentInfo?.customer.email,
         },
         success_url: `${process.env.CLIENT_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.CLIENT_DOMAIN}/book/${paymentInfo?.bookId}`,
+        cancel_url: `${process.env.CLIENT_DOMAIN}/all-books/${paymentInfo?.bookId}`,
       });
       res.send({ url: session.url });
     });
@@ -158,7 +232,6 @@ async function run() {
           orderId: result.insertedId,
         });
       } catch (error) {
-
         return res.status(500).send({
           success: false,
           message: "Error processing order",
@@ -183,7 +256,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/dashboard/my-inventory/:email", async (req, res) => {
+    app.get("/my-inventory/:email", async (req, res) => {
       const email = req.params.email;
 
       const result = await booksCollection
