@@ -102,6 +102,29 @@ async function run() {
       }
     });
 
+    // update user profile
+    app.patch("/users/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const { name, image } = req.body;
+
+        const result = await usersCollection.updateOne(
+          { email },
+          {
+            $set: {
+              name,
+              image,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
     //   books related API's
     app.get("/books", async (req, res) => {
       const query = {};
@@ -135,8 +158,8 @@ async function run() {
         const id = req.params.id;
         const updatedData = req.body;
 
-          delete updatedData._id;
-          console.log("Update payload:", updatedData);
+        delete updatedData._id;
+        console.log("Update payload:", updatedData);
 
         const result = await booksCollection.updateOne(
           { _id: new ObjectId(id) },
@@ -291,6 +314,25 @@ async function run() {
       const result = await ordersCollection
         .find({ "seller.email": email })
         .toArray();
+      res.send(result);
+    });
+
+    app.patch("/orders/:id", async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const result = await ordersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status } }
+      );
+      res.send(result);
+    });
+
+    // Cancel order
+    app.delete("/orders/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await ordersCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
       res.send(result);
     });
 
