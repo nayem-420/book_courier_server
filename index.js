@@ -43,7 +43,6 @@ async function run() {
       try {
         const user = req.body;
 
-        // Check if user already exists
         const existingUser = await usersCollection.findOne({
           email: user.email,
         });
@@ -59,7 +58,7 @@ async function run() {
         // Create new user
         const newUser = {
           ...user,
-          role: "buyer",
+          role: "Customer",
           createdAt: new Date(),
         };
 
@@ -80,7 +79,7 @@ async function run() {
     });
 
     // Get user by email
-    app.get("/users/:email", async (req, res) => {
+    app.get("/users/role/:email", async (req, res) => {
       try {
         const email = req.params.email;
         const user = await usersCollection.findOne({ email: email });
@@ -95,6 +94,7 @@ async function run() {
         res.send(user);
       } catch (error) {
         res.status(500).send({
+          role: result?.role,
           success: false,
           message: "Error fetching user",
           error: error.message,
@@ -128,6 +128,25 @@ async function run() {
       const id = req.params.id;
       const result = await booksCollection.findOne({ _id: new ObjectId(id) });
       res.send(result);
+    });
+
+    app.patch("/books/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedData = req.body;
+
+          delete updatedData._id;
+          console.log("Update payload:", updatedData);
+
+        const result = await booksCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updatedData }
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
     });
 
     app.post("/books", async (req, res) => {
@@ -167,9 +186,14 @@ async function run() {
       res.send({ url: session.url });
     });
 
-    app.post("/dashboard/payment-success", async (req, res) => {
+    app.patch("/dashboard/payment-success", async (req, res) => {
       try {
-        const { sessionId } = req.body;
+        const sessionId = req.query.session_id;
+        if (!sessionId) {
+          return res
+            .status(400)
+            .send({ success: false, message: "No session id" });
+        }
 
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
@@ -180,39 +204,55 @@ async function run() {
           });
         }
 
-        const existingOrder = await ordersCollection.findOne({
-          transactionId: session.payment_intent,
-        });
+        const transactionId = session.payment_intent;
+
+        const existingOrder = await ordersCollection.findOne({ transactionId });
 
         if (existingOrder) {
+          console.log("Order already exists, skipping creation");
           return res.send({
             success: true,
             message: "Order already exists",
-            transactionId: session.payment_intent,
             orderId: existingOrder._id,
+            isExisting: true,
           });
         }
 
-        const book = await booksCollection.findOne({
-          _id: new ObjectId(session.metadata.bookId),
-        });
+        const bookId = new ObjectId(session.metadata.bookId);
 
+        const book = await booksCollection.findOne({ _id: bookId });
         if (!book) {
-          return res.status(404).send({
+          return res
+            .status(404)
+            .send({ success: false, message: "Book not found" });
+        }
+
+        if (book.quantity < 1) {
+          return res.status(400).send({
             success: false,
-            message: "Book not found",
+            message: "Book is out of stock",
           });
         }
 
+        // Book update
+        await booksCollection.updateOne(
+          { _id: bookId },
+          {
+            $set: { paymentStatus: "paid" },
+            $inc: { quantity: -1 },
+          }
+        );
+
+        // Order create
         const orderInfo = {
-          bookId: session.metadata.bookId,
-          image: book.image || "",
-          title: book.title || "Unknown Book",
-          transactionId: session.payment_intent,
+          bookId: bookId,
+          image: book.image,
+          title: book.title,
+          transactionId,
           customer: session.metadata.customer,
           status: "pending",
           seller: book.seller,
-          category: book.status || "N/A",
+          category: book.category,
           quantity: 1,
           price: session.amount_total / 100,
           createdAt: new Date(),
@@ -220,19 +260,17 @@ async function run() {
 
         const result = await ordersCollection.insertOne(orderInfo);
 
-        await booksCollection.updateOne(
-          { _id: new ObjectId(session.metadata.bookId) },
-          { $inc: { quantity: -1 } }
-        );
+        console.log("New order created:", result.insertedId);
 
-        return res.send({
+        res.send({
           success: true,
           message: "Order created successfully",
-          transactionId: session.payment_intent,
           orderId: result.insertedId,
+          isExisting: false,
         });
       } catch (error) {
-        return res.status(500).send({
+        console.error("Payment error:", error);
+        res.status(500).send({
           success: false,
           message: "Error processing order",
           error: error.message,
@@ -256,7 +294,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/my-inventory/:email", async (req, res) => {
+    app.get("/dashboard/my-inventory/:email", async (req, res) => {
       const email = req.params.email;
 
       const result = await booksCollection
