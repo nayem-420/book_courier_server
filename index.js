@@ -1,25 +1,60 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const app = express();
-require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET);
 
 const port = process.env.PORT || 3000;
 
-// middleware
+// Firebase Admin SDK for verifying JWT tokens
+const admin = require("firebase-admin");
+const serviceAccount = require("./book-courier-auth-firebase-adminsdk.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+// ---------------------------- MIDDLEWARE ---------------------------- //
+
+// Middleware to parse incoming JSON requests
 app.use(express.json());
+
+// CORS configuration
 app.use(
   cors({
-    origin: [process.env.CLIENT_DOMAIN],
+    origin: [process.env.CLIENT_DOMAIN], // Allow requests only from client domain
     credentials: true,
     optionSuccessStatus: 200,
   })
 );
 
+// ---------------------------- JWT & ROLE VERIFICATION ---------------------------- //
+
+// Verify Firebase JWT token
+const verifyJWT = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).send({ message: "unauthorized" });
+  }
+
+  try {
+    const token = authHeader.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(token);
+
+    req.tokenEmail = decoded.email;
+    req.decoded = decoded;
+
+    next();
+  } catch (error) {
+    return res.status(401).send({ message: "unauthorized" });
+  }
+};
+
+// ---------------------------- MONGODB CONNECTION ---------------------------- //
+
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.xhgpsyg.mongodb.net/?appName=Cluster0`;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -28,81 +63,97 @@ const client = new MongoClient(uri, {
   },
 });
 
+// Main async function to run DB operations
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
-    // await client.connect();
-
+    // Connect to MongoDB and define collections
     const db = client.db("book-courier-db");
     const booksCollection = db.collection("books");
     const ordersCollection = db.collection("orders");
     const usersCollection = db.collection("users");
+    const sellerRequestsCollection = db.collection("sellerRequests");
 
-    //   user related API's
+    // Verify if user is ADMIN
+    const verifyADMIN = async (req, res, next) => {
+      const email = req.tokenEmail;
+      const user = await usersCollection.findOne({ email });
+      if (user?.role !== "admin")
+        return res
+          .status(403)
+          .send({ message: "Admin only Actions!", role: user?.role });
+
+      next();
+    };
+
+    // Verify if user is SELLER
+    const verifySELLER = async (req, res, next) => {
+      const email = req.tokenEmail;
+      const user = await usersCollection.findOne({ email });
+      if (user?.role !== "seller")
+        return res
+          .status(403)
+          .send({ message: "Seller only Actions!", role: user?.role });
+
+      next();
+    };
+
+    // <----------------------------< USER RELATED APIs >----------------------------> //
+
+    // Create new user
     app.post("/users", async (req, res) => {
-      try {
-        const user = req.body;
+      const userData = req.body;
+      userData.created_at = new Date().toISOString();
+      userData.last_loggedIn = new Date().toISOString();
+      userData.role = "customer";
 
-        const existingUser = await usersCollection.findOne({
-          email: user.email,
+      const query = {
+        email: userData.email,
+      };
+
+      const alreadyExists = await usersCollection.findOne(query);
+      console.log("User Already Exists---> ", !!alreadyExists);
+
+      if (alreadyExists) {
+        console.log("Updating user info......");
+        const result = await usersCollection.updateOne(query, {
+          $set: {
+            last_loggedIn: new Date().toISOString(),
+          },
         });
-
-        if (existingUser) {
-          return res.send({
-            success: true,
-            message: "User already exists",
-            insertedId: existingUser._id,
-          });
-        }
-
-        // Create new user
-        const newUser = {
-          ...user,
-          role: "Customer",
-          createdAt: new Date(),
-        };
-
-        const result = await usersCollection.insertOne(newUser);
-
-        res.send({
-          success: true,
-          message: "User created successfully",
-          insertedId: result.insertedId,
-        });
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: "Error creating user",
-          error: error.message,
-        });
+        return res.send(result);
       }
+
+      console.log("Saving new user info......");
+      const result = await usersCollection.insertOne(userData);
+      res.send(result);
     });
 
     // Get user by email
-    app.get("/users/role/:email", async (req, res) => {
-      try {
-        const email = req.params.email;
-        const user = await usersCollection.findOne({ email: email });
-
-        if (!user) {
-          return res.status(404).send({
-            success: false,
-            message: "User not found",
-          });
-        }
-
-        res.send(user);
-      } catch (error) {
-        res.status(500).send({
-          role: result?.role,
-          success: false,
-          message: "Error fetching user",
-          error: error.message,
-        });
-      }
+    app.get("/users/role", verifyJWT, async (req, res) => {
+      const result = await usersCollection.findOne({ email: req.tokenEmail });
+      res.send({ role: result?.role });
     });
 
-    // update user profile
+    // Get all users (admin only)
+    app.get("/users", verifyJWT, verifyADMIN, async (req, res) => {
+      const users = await usersCollection.find().toArray();
+      res.send(users);
+    });
+
+    // Update user role by ID (for admin)
+    app.patch("/users/:id", async (req, res) => {
+      const id = req.params.id;
+      const { role } = req.body;
+
+      const result = await usersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        [{ $set: { role: { $toLower: "$role" } } }]
+      );
+
+      res.send(result);
+    });
+
+    // Update user profile (name & image)
     app.patch("/users/:email", async (req, res) => {
       try {
         const email = req.params.email;
@@ -125,7 +176,21 @@ async function run() {
       }
     });
 
-    //   books related API's
+    // update a user's role
+    app.patch("/update-role", verifyJWT, verifyADMIN, async (req, res) => {
+      const { email, role } = req.body;
+      const result = await usersCollection.updateOne(
+        { email },
+        { $set: { role: role.toLowerCase() } }
+      );
+      await sellerRequestsCollection.deleteOne({ email });
+
+      res.send(result);
+    });
+
+    // <----------------------------< BOOKS RELATED APIs >----------------------------> //
+
+    // Get all books or filter by seller email
     app.get("/books", async (req, res) => {
       const query = {};
       const { email } = req.query;
@@ -138,6 +203,7 @@ async function run() {
       res.send(result);
     });
 
+    // Get first 6 published books for home page
     app.get("/home-books", async (req, res) => {
       const result = await booksCollection
         .find({ status: "published" })
@@ -147,17 +213,18 @@ async function run() {
       res.send(result);
     });
 
+    // Get single book by ID
     app.get("/books/:id", async (req, res) => {
       const id = req.params.id;
       const result = await booksCollection.findOne({ _id: new ObjectId(id) });
       res.send(result);
     });
 
+    // Update book by ID
     app.patch("/books/:id", async (req, res) => {
       try {
         const id = req.params.id;
         const updatedData = req.body;
-
         delete updatedData._id;
         console.log("Update payload:", updatedData);
 
@@ -172,19 +239,21 @@ async function run() {
       }
     });
 
-    app.post("/books", async (req, res) => {
+    // Add new book (only seller)
+    app.post("/books", verifyJWT, verifySELLER, async (req, res) => {
       const books = req.body;
       const result = await booksCollection.insertOne(books);
       res.send(result);
     });
 
-    //   payment related API's
+    // <----------------------------< PAYMENT APIs >----------------------------> //
+
+    // Create Stripe checkout session
     app.post("/create-checkout-session", async (req, res) => {
       const paymentInfo = req.body;
       const session = await stripe.checkout.sessions.create({
         line_items: [
           {
-            // Provide the exact Price ID (for example, price_1234) of the product you want to sell
             price_data: {
               currency: "USD",
               product_data: {
@@ -192,7 +261,7 @@ async function run() {
                 description: paymentInfo?.description,
                 images: [paymentInfo?.image],
               },
-              unit_amount: paymentInfo?.price * 100,
+              unit_amount: paymentInfo?.price * 100, // Amount in cents
             },
             quantity: paymentInfo?.quantity,
           },
@@ -209,6 +278,7 @@ async function run() {
       res.send({ url: session.url });
     });
 
+    // Handle payment success and create order
     app.patch("/dashboard/payment-success", async (req, res) => {
       try {
         const sessionId = req.query.session_id;
@@ -257,7 +327,7 @@ async function run() {
           });
         }
 
-        // Book update
+        // Update book quantity and payment status
         await booksCollection.updateOne(
           { _id: bookId },
           {
@@ -266,7 +336,7 @@ async function run() {
           }
         );
 
-        // Order create
+        // Create new order
         const orderInfo = {
           bookId: bookId,
           image: book.image,
@@ -301,14 +371,35 @@ async function run() {
       }
     });
 
-    app.get("/dashboard/my-orders/:email", async (req, res) => {
-      const email = req.params.email;
-
-      const result = await ordersCollection.find({ customer: email }).toArray();
+    // Get orders for logged-in user
+    app.get("/dashboard/my-orders", verifyJWT, async (req, res) => {
+      const result = await ordersCollection
+        .find({ customer: req.tokenEmail })
+        .toArray();
       res.send(result);
     });
 
-    //   seller orders
+    // Get payment success details by email
+    app.get("/dashboard/my-orders", verifyJWT, async (req, res) => {
+      // const email = req.query.email;
+      const query = {};
+
+      if (email) {
+        query.customerEmail = email;
+
+        if (email != req.decoded_email) {
+          return res.status(403).send({ message: "forbidden access" });
+        }
+      }
+      const result = await ordersCollection
+        .find({ customer: req.tokenEmail })
+        .toArray();
+      res.send(result);
+    });
+
+    // <----------------------------< SELLER DASHBOARD >----------------------------> //
+
+    // Get all orders for a seller
     app.get("/dashboard/manage-orders/:email", async (req, res) => {
       const email = req.params.email;
       const result = await ordersCollection
@@ -317,6 +408,17 @@ async function run() {
       res.send(result);
     });
 
+    // Get all inventory for a seller
+    app.get("/dashboard/my-inventory/:email", async (req, res) => {
+      const email = req.params.email;
+
+      const result = await booksCollection
+        .find({ "seller.email": email })
+        .toArray();
+      res.send(result);
+    });
+
+    // Update order status
     app.patch("/orders/:id", async (req, res) => {
       const id = req.params.id;
       const { status } = req.body;
@@ -336,31 +438,92 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/dashboard/my-inventory/:email", async (req, res) => {
-      const email = req.params.email;
+    // Update user role to Seller
+    app.post("/become-seller", verifyJWT, async (req, res) => {
+      const email = req.tokenEmail;
 
-      const result = await booksCollection
-        .find({ "seller.email": email })
-        .toArray();
+      const alreadyExists = await sellerRequestsCollection.findOne({ email });
+
+      if (alreadyExists)
+        return res.status(409).send({ message: "Requested, please wait." });
+
+      const result = await sellerRequestsCollection.insertOne({ email });
       res.send(result);
     });
 
-    // Send a ping to confirm a successful connection
+    app.get("/seller-requests", verifyJWT, verifyADMIN, async (req, res) => {
+      const requests = await sellerRequestsCollection.find().toArray();
+
+      // Attach current role for each request
+      const requestsWithRole = await Promise.all(
+        requests.map(async (reqObj) => {
+          const user = await usersCollection.findOne({ email: reqObj.email });
+          return {
+            ...reqObj,
+            role: user?.role || "Pending",
+            status: user?.role === "seller" ? "Accepted" : "Pending",
+          };
+        })
+      );
+
+      res.send(requestsWithRole);
+    });
+
+    app.get("/seller-request/status", verifyJWT, async (req, res) => {
+      const email = req.tokenEmail;
+      const exists = await sellerRequestsCollection.findOne({ email });
+      res.send({ requested: !!exists });
+    });
+
+    app.delete(
+      "/seller-request/:email",
+      verifyJWT,
+      verifyADMIN,
+      async (req, res) => {
+        const email = req.params.email;
+        const result = await sellerRequestsCollection.deleteOne({ email });
+        res.send(result);
+      }
+    );
+
+
+    app.patch(
+      "/seller-requests/approve/:email",
+      verifyJWT,
+      verifyAdmin,
+      async (req, res) => {
+        const email = req.params.email;
+
+        await usersCollection.updateOne(
+          { email },
+          { $set: { role: "seller" } }
+        );
+
+        await sellerRequestsCollection.deleteOne({ email });
+
+        res.send({ message: "Seller approved successfully" });
+      }
+    );
+
+    // Ping MongoDB to confirm connection
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
   } finally {
-    // Ensures that the client will close when you finish/error
+    // Ensure client closes when finished (optional)
     // await client.close();
   }
 }
 run().catch(console.dir);
 
+// ---------------------------- DEFAULT ROUTE ---------------------------- //
+
 app.get("/", (req, res) => {
   res.send("Book Courier Server is Running on port!");
 });
 
+// Start the server
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
 });
