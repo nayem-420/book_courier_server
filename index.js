@@ -17,17 +17,19 @@ admin.initializeApp({
 
 // ---------------------------- MIDDLEWARE ---------------------------- //
 
-// Middleware to parse incoming JSON requests
-app.use(express.json());
+
 
 // CORS configuration
 app.use(
   cors({
-    origin: [process.env.CLIENT_DOMAIN], // Allow requests only from client domain
+    origin: ["http://localhost:5173", "https://book-courier-auth.web.app"],
     credentials: true,
-    optionSuccessStatus: 200,
+    optionsSuccessStatus: 200,
   })
 );
+
+// Middleware to parse incoming JSON requests
+app.use(express.json());
 
 // ---------------------------- JWT & ROLE VERIFICATION ---------------------------- //
 
@@ -339,7 +341,6 @@ async function run() {
           }
         );
 
-        
         const orderInfo = {
           bookId: bookId,
           image: book.image,
@@ -384,19 +385,14 @@ async function run() {
 
     // Get payment success details by email
     app.get("/dashboard/my-orders/:email", verifyJWT, async (req, res) => {
-      
-      const query = {};
+      const email = req.params.email;
 
-      if (email) {
-        query.customerEmail = email;
-
-        if (email != req.decoded_email) {
-          return res.status(403).send({ message: "forbidden access" });
-        }
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "forbidden access" });
       }
-      const result = await ordersCollection
-        .find({ "seller.email": email })
-        .toArray();
+
+      const result = await ordersCollection.find({ customer: email }).toArray();
+
       res.send(result);
     });
 
@@ -489,11 +485,10 @@ async function run() {
       }
     );
 
-
     app.patch(
       "/seller-requests/approve/:email",
       verifyJWT,
-      verifyAdmin,
+      verifyADMIN,
       async (req, res) => {
         const email = req.params.email;
 
