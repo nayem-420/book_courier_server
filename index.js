@@ -157,14 +157,14 @@ async function run() {
     app.patch("/users/:email", async (req, res) => {
       try {
         const email = req.params.email;
-        const { name, image } = req.body;
+        const { displayName, photoURL } = req.body;
 
         const result = await usersCollection.updateOne(
           { email },
           {
             $set: {
-              name,
-              image,
+              name: displayName,
+              image: photoURL,
               updatedAt: new Date(),
             },
           }
