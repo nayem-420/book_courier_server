@@ -398,7 +398,6 @@ async function run() {
 
     // <----------------------------< SELLER DASHBOARD >----------------------------> //
 
-    // Get all orders for a seller
     app.get("/dashboard/manage-orders/:email", async (req, res) => {
       const email = req.params.email;
       const result = await ordersCollection
@@ -509,7 +508,7 @@ async function run() {
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
   } finally {
-    // Ensure client closes when finished (optional)
+    // not important
     // await client.close();
   }
 }
