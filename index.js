@@ -101,31 +101,34 @@ async function run() {
 
     // Create new user
     app.post("/users", async (req, res) => {
-      const userData = req.body;
-      userData.created_at = new Date().toISOString();
-      userData.last_loggedIn = new Date().toISOString();
-      userData.role = "customer";
+      try {
+        const userData = req.body;
+        userData.created_at = new Date().toISOString();
+        userData.last_loggedIn = new Date().toISOString();
+        userData.role = "customer";
 
-      const query = {
-        email: userData.email,
-      };
+        const query = { email: userData.email };
+        const alreadyExists = await usersCollection.findOne(query);
 
-      const alreadyExists = await usersCollection.findOne(query);
-      console.log("User Already Exists---> ", !!alreadyExists);
+        if (alreadyExists) {
+          const result = await usersCollection.updateOne(query, {
+            $set: { last_loggedIn: new Date().toISOString() },
+          });
+          return res.send({
+            message: "User updated successfully",
+            result,
+          });
+        }
 
-      if (alreadyExists) {
-        console.log("Updating user info......");
-        const result = await usersCollection.updateOne(query, {
-          $set: {
-            last_loggedIn: new Date().toISOString(),
-          },
+        const result = await usersCollection.insertOne(userData);
+        res.send({
+          message: "User created successfully",
+          result,
         });
-        return res.send(result);
+      } catch (error) {
+        console.error("User creation error:", error);
+        res.status(500).send({ message: error.message });
       }
-
-      console.log("Saving new user info......");
-      const result = await usersCollection.insertOne(userData);
-      res.send(result);
     });
 
     // Get user by email
