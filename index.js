@@ -380,7 +380,7 @@ async function run() {
     });
 
     // Get payment success details by email
-    app.get("/dashboard/my-orders", verifyJWT, async (req, res) => {
+    app.get("/dashboard/my-orders/:email", verifyJWT, async (req, res) => {
       
       const query = {};
 
@@ -392,7 +392,7 @@ async function run() {
         }
       }
       const result = await ordersCollection
-        .find({ customer: req.tokenEmail })
+        .find({ "seller.email": email })
         .toArray();
       res.send(result);
     });
