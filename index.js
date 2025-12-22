@@ -381,7 +381,7 @@ async function run() {
 
     // Get payment success details by email
     app.get("/dashboard/my-orders", verifyJWT, async (req, res) => {
-      // const email = req.query.email;
+      
       const query = {};
 
       if (email) {
