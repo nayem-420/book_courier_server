@@ -22,7 +22,7 @@ admin.initializeApp({
 // CORS configuration
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://book-courier-auth.web.app"],
+    origin: ["https://book-courier-auth.web.app"],
     credentials: true,
     optionsSuccessStatus: 200,
   })
