@@ -336,7 +336,7 @@ async function run() {
           }
         );
 
-        // Create new order
+        
         const orderInfo = {
           bookId: bookId,
           image: book.image,
