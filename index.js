@@ -22,7 +22,7 @@ admin.initializeApp({
 // CORS configuration
 app.use(
   cors({
-    origin: ["https://book-courier-auth.web.app"],
+    origin: ["http://localhost:5173", "https://book-courier-auth.web.app"],
     credentials: true,
     optionsSuccessStatus: 200,
   })
@@ -103,34 +103,26 @@ async function run() {
 
     // Create new user
     app.post("/users", async (req, res) => {
-      try {
-        const userData = req.body;
-        userData.created_at = new Date().toISOString();
-        userData.last_loggedIn = new Date().toISOString();
-        userData.role = "customer";
+      const userData = req.body;
+      userData.created_at = new Date().toISOString();
+      userData.last_loggedIn = new Date().toISOString();
+      userData.role = "customer";
 
-        const query = { email: userData.email };
-        const alreadyExists = await usersCollection.findOne(query);
+      const query = { email: userData.email };
+      const alreadyExists = await usersCollection.findOne(query);
 
-        if (alreadyExists) {
-          const result = await usersCollection.updateOne(query, {
-            $set: { last_loggedIn: new Date().toISOString() },
-          });
-          return res.send({
-            message: "User updated successfully",
-            result,
-          });
-        }
-
-        const result = await usersCollection.insertOne(userData);
-        res.send({
-          message: "User created successfully",
+      if (alreadyExists) {
+        const result = await usersCollection.updateOne(query, {
+          $set: { last_loggedIn: new Date().toISOString() },
+        });
+        return res.send({
+          message: "User updated successfully",
           result,
         });
-      } catch (error) {
-        console.error("User creation error:", error);
-        res.status(500).send({ message: error.message });
       }
+
+      const result = await usersCollection.insertOne(userData);
+      res.send(result);
     });
 
     // Get user by email
