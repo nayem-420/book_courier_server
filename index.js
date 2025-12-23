@@ -125,7 +125,7 @@ async function run() {
       res.send(result);
     });
 
-    // Get user by email
+    // Get user by email and link to frontend
     app.get("/users/role", verifyJWT, async (req, res) => {
       const result = await usersCollection.findOne({ email: req.tokenEmail });
       res.send({ role: result?.role });
